@@ -1,9 +1,15 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useApp } from '../AppContext';
+import { createClient } from '@/lib/supabase/client';
+import {
+  readAll,
+  subscribeRescheduleRequests,
+  isRescheduleRequestUiEnabled,
+} from '@/lib/reschedule/rescheduleRequestStore';
 import {
   LayoutDashboard,
   ClipboardList,
@@ -20,14 +26,89 @@ import {
 
 export default function AdminMobileBottomNav() {
   const pathname = usePathname();
-  const { bookingPayments, estimateRequests, flashReservations } = useApp();
+  const { estimateRequests, flashReservations } = useApp();
   const [isFabOpen, setIsFabOpen] = useState(false);
 
-  // Calculate pending badge count for requests
-  const pendingCount =
-    bookingPayments.filter((p) => p.paymentType === 'DEPOSIT' && p.status === 'SUBMITTED').length +
-    estimateRequests.filter((e) => e.status === 'PENDING' && e.request_type !== 'DIRECT_BOOKING').length +
-    (flashReservations || []).filter((r: any) => r.status === 'PENDING').length;
+  // Category 2: Pending deposit slips from booking_payment_submissions
+  const [pendingSlipCount, setPendingSlipCount] = useState<number>(0);
+
+  // Category 3: Pending reschedule requests
+  const [pendingRescheduleCount, setPendingRescheduleCount] = useState<number>(0);
+
+  // 1. Group 1: New Requests (Custom requests + Flash reservations with status = 'PENDING')
+  const newCustomRequestCount = (estimateRequests || []).filter(
+    (e) => e.status === 'PENDING' && e.request_type !== 'DIRECT_BOOKING'
+  ).length;
+
+  const newFlashRequestCount = (flashReservations || []).filter(
+    (r: any) => r.status === 'PENDING'
+  ).length;
+
+  const newRequestCount = newCustomRequestCount + newFlashRequestCount;
+
+  // 2. Group 2: New Deposit Slips (booking_payment_submissions with status = 'PENDING')
+  const fetchPendingSlipCount = useCallback(async () => {
+    try {
+      const supabase = createClient();
+      const { count, error } = await supabase
+        .from('booking_payment_submissions')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'PENDING');
+      if (!error && typeof count === 'number') {
+        setPendingSlipCount(count);
+      }
+    } catch (err) {
+      console.error('Failed to fetch pending slip count in AdminMobileBottomNav:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPendingSlipCount();
+
+    const handleRealtime = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.table === 'booking_payment_submissions') {
+        fetchPendingSlipCount();
+      }
+    };
+
+    const handleFocus = () => {
+      fetchPendingSlipCount();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('admin:realtime', handleRealtime);
+      window.addEventListener('focus', handleFocus);
+      return () => {
+        window.removeEventListener('admin:realtime', handleRealtime);
+        window.removeEventListener('focus', handleFocus);
+      };
+    }
+  }, [fetchPendingSlipCount]);
+
+  // 3. Group 3: New Reschedule Requests (rescheduleRequestStore with status = 'PENDING')
+  useEffect(() => {
+    const updateRescheduleCount = () => {
+      if (!isRescheduleRequestUiEnabled()) {
+        setPendingRescheduleCount(0);
+        return;
+      }
+      try {
+        const all = readAll();
+        const pending = all.filter((r: any) => r.status === 'PENDING').length;
+        setPendingRescheduleCount(pending);
+      } catch (_) {
+        setPendingRescheduleCount(0);
+      }
+    };
+
+    updateRescheduleCount();
+    const unsubscribe = subscribeRescheduleRequests(updateRescheduleCount);
+    return () => unsubscribe();
+  }, []);
+
+  // Total unified requests badge count: Group 1 + Group 2 + Group 3
+  const pendingCount = newRequestCount + pendingSlipCount + pendingRescheduleCount;
 
   // Body scroll lock and ESC key listener for FAB Menu Panel
   useEffect(() => {

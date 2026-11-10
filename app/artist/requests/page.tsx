@@ -382,7 +382,7 @@ export default function ArtistRequestsPage() {
 
         const { data: custRows } = await supabase
           .from('customers')
-          .select('user_id, display_name, phone, email, date_of_birth')
+          .select('user_id, display_name, phone, email, date_of_birth, eligibility_confirmed_at, profile_completed_at, has_medical_condition, medical_condition_note, medical_conditions, has_allergy, allergy_note, allergies')
           .in('user_id', customerUserIds);
 
         if (custRows) {
@@ -395,6 +395,14 @@ export default function ArtistRequestsPage() {
                 display_name: existingC.display_name || c.display_name,
                 phone: existingC.phone || c.phone,
                 date_of_birth: c.date_of_birth || existingC.date_of_birth || null,
+                eligibility_confirmed_at: c.eligibility_confirmed_at || existingC.eligibility_confirmed_at || null,
+                profile_completed_at: c.profile_completed_at || existingC.profile_completed_at || null,
+                has_medical_condition: c.has_medical_condition !== undefined ? c.has_medical_condition : existingC.has_medical_condition,
+                medical_condition_note: c.medical_condition_note || existingC.medical_condition_note || null,
+                medical_conditions: c.medical_conditions || existingC.medical_conditions || null,
+                has_allergy: c.has_allergy !== undefined ? c.has_allergy : existingC.has_allergy,
+                allergy_note: c.allergy_note || existingC.allergy_note || null,
+                allergies: c.allergies || existingC.allergies || null,
               });
             }
           });
@@ -555,10 +563,173 @@ export default function ArtistRequestsPage() {
     return undefined;
   };
 
+  const resolveItemHealth = (
+    item: {
+      has_medical_condition?: boolean | null;
+      medical_condition_note?: string | null;
+      has_allergy?: boolean | null;
+      allergy_note?: string | null;
+      customer_user_id?: string | null;
+    },
+    linkedEstimate?: any,
+    linkedFlash?: any,
+    linkedBooking?: any
+  ) => {
+    const customer = item.customer_user_id ? customersMap.get(item.customer_user_id) : null;
+
+    let hasMed: boolean | null | undefined = undefined;
+    let medNote: string | null = null;
+    let hasAll: boolean | null | undefined = undefined;
+    let allNote: string | null = null;
+
+    // 1. Direct item flags (if explicitly present on item)
+    if (item.has_medical_condition !== undefined && item.has_medical_condition !== null) {
+      hasMed = Boolean(item.has_medical_condition);
+      medNote = item.medical_condition_note || null;
+    }
+    if (item.has_allergy !== undefined && item.has_allergy !== null) {
+      hasAll = Boolean(item.has_allergy);
+      allNote = item.allergy_note || null;
+    }
+
+    // 2. Check customer master profile (customers table) if unresolved
+    if (hasMed === undefined && customer) {
+      if (customer.has_medical_condition !== undefined && customer.has_medical_condition !== null) {
+        hasMed = Boolean(customer.has_medical_condition);
+        medNote = customer.medical_condition_note || customer.medical_conditions || null;
+      } else if (customer.medical_conditions?.trim()) {
+        if (customer.medical_conditions === 'ไม่มี' || customer.medical_conditions === 'false') {
+          hasMed = false;
+        } else {
+          hasMed = true;
+          medNote = customer.medical_conditions.trim();
+        }
+      }
+    }
+    if (hasAll === undefined && customer) {
+      if (customer.has_allergy !== undefined && customer.has_allergy !== null) {
+        hasAll = Boolean(customer.has_allergy);
+        allNote = customer.allergy_note || customer.allergies || null;
+      } else if (customer.allergies?.trim()) {
+        if (customer.allergies === 'ไม่มี' || customer.allergies === 'false') {
+          hasAll = false;
+        } else {
+          hasAll = true;
+          allNote = customer.allergies.trim();
+        }
+      }
+    }
+
+    // 3. Fallback to linked estimate if unresolved
+    if (hasMed === undefined && linkedEstimate) {
+      if (linkedEstimate.has_medical_condition !== undefined && linkedEstimate.has_medical_condition !== null) {
+        hasMed = Boolean(linkedEstimate.has_medical_condition);
+        medNote = linkedEstimate.medical_condition_note || null;
+      }
+    }
+    if (hasAll === undefined && linkedEstimate) {
+      if (linkedEstimate.has_allergy !== undefined && linkedEstimate.has_allergy !== null) {
+        hasAll = Boolean(linkedEstimate.has_allergy);
+        allNote = linkedEstimate.allergy_note || null;
+      }
+    }
+
+    // 4. Fallback to linked flash reservation if unresolved
+    if (hasMed === undefined && linkedFlash) {
+      if (linkedFlash.has_medical_condition !== undefined && linkedFlash.has_medical_condition !== null) {
+        hasMed = Boolean(linkedFlash.has_medical_condition);
+        medNote = linkedFlash.medical_condition_note || null;
+      }
+    }
+    if (hasAll === undefined && linkedFlash) {
+      if (linkedFlash.has_allergy !== undefined && linkedFlash.has_allergy !== null) {
+        hasAll = Boolean(linkedFlash.has_allergy);
+        allNote = linkedFlash.allergy_note || null;
+      }
+    }
+
+    // 5. Fallback to linked booking if unresolved
+    if (hasMed === undefined && linkedBooking) {
+      if (linkedBooking.has_medical_condition !== undefined && linkedBooking.has_medical_condition !== null) {
+        hasMed = Boolean(linkedBooking.has_medical_condition);
+        medNote = linkedBooking.medical_condition_note || null;
+      }
+    }
+    if (hasAll === undefined && linkedBooking) {
+      if (linkedBooking.has_allergy !== undefined && linkedBooking.has_allergy !== null) {
+        hasAll = Boolean(linkedBooking.has_allergy);
+        allNote = linkedBooking.allergy_note || null;
+      }
+    }
+
+    return {
+      hasMed: hasMed ?? null,
+      hasAll: hasAll ?? null,
+      medNote,
+      allNote,
+    };
+  };
+
+  const renderHealthAlertBadge = (
+    hasMed: boolean | null | undefined,
+    hasAll: boolean | null | undefined,
+    isInactive = false,
+    itemType: 'ESTIMATE' | 'FLASH' | 'SLIP' = 'ESTIMATE'
+  ) => {
+    const isAlert = hasMed === true || hasAll === true;
+    const isHealthy = hasMed === false && hasAll === false;
+
+    if (isAlert) {
+      return (
+        <span
+          title="มีข้อมูลสุขภาพ กรุณาตรวจสอบรายละเอียดก่อนให้บริการ"
+          className={
+            isInactive
+              ? "bg-zinc-900/90 text-zinc-400 border border-zinc-700/80 px-2 py-0.5 rounded text-[10px] font-medium inline-flex items-center gap-1 cursor-help"
+              : "bg-amber-500/15 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded text-[10px] font-semibold inline-flex items-center gap-1 cursor-help"
+          }
+        >
+          <TriangleAlert size={10} className={isInactive ? "text-zinc-500 shrink-0" : "text-amber-400 shrink-0"} />
+          <span>มีข้อมูล</span>
+        </span>
+      );
+    }
+
+    // Mirror Admin behavior:
+    // - For Custom / Flash estimate requests (EstimateRequestList.tsx): Boolean(hasMed || hasAll) ? 'มีข้อมูล' : 'ปกติ'
+    // - For Bookings / Slips (BookingList.tsx): isHealthy ? 'ปกติ' : 'ไม่ระบุ'
+    if (isHealthy || (itemType !== 'SLIP' && (hasMed === null || hasMed === undefined) && (hasAll === null || hasAll === undefined))) {
+      return (
+        <span
+          className={
+            isInactive
+              ? "bg-zinc-900/60 text-zinc-500 border border-zinc-800/80 px-2 py-0.5 rounded text-[10px] font-medium inline-flex items-center"
+              : "bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 px-2 py-0.5 rounded text-[10px] font-medium inline-flex items-center"
+          }
+        >
+          ปกติ
+        </span>
+      );
+    }
+
+    return (
+      <span
+        className={
+          isInactive
+            ? "bg-zinc-900/60 text-zinc-500 border border-zinc-800/80 px-2 py-0.5 rounded text-[10px] font-medium inline-flex items-center"
+            : "bg-[#1F1D1A] text-[#A89F91] border border-[#4A443A] px-2 py-0.5 rounded text-[10px] font-medium inline-flex items-center"
+        }
+      >
+        ไม่ระบุ
+      </span>
+    );
+  };
+
   const handleOpenRequestDetail = (est: any) => {
     const customer = est.customer_user_id ? customersMap.get(est.customer_user_id) : null;
     const prof = est.customer_user_id ? profilesMap.get(est.customer_user_id) : null;
     const isFlash = Boolean(est.is_flash || est.item_type === 'FLASH' || est.sourceType === 'FLASH' || est.flash_design_id);
+    const healthRes = resolveItemHealth(est);
 
     const detail: ArtistPendingEstimateDetail = {
       id: est.id,
@@ -582,10 +753,10 @@ export default function ArtistRequestsPage() {
       flash_image_url: est.flash_design_image_url ?? est.flash_designs?.image_url ?? est.flash_image_url ?? null,
       flash_title: est.flash_design_title ?? est.flash_designs?.title ?? est.flash_title ?? null,
       flash_size_label: est.flash_design_size_label ?? est.flash_designs?.size_label ?? est.size_label ?? null,
-      has_medical_condition: est.has_medical_condition ?? (customer as any)?.has_medical_condition ?? null,
-      medical_condition_note: est.medical_condition_note ?? (customer as any)?.medical_condition_note ?? null,
-      has_allergy: est.has_allergy ?? (customer as any)?.has_allergy ?? null,
-      allergy_note: est.allergy_note ?? (customer as any)?.allergy_note ?? null,
+      has_medical_condition: healthRes.hasMed ?? undefined,
+      medical_condition_note: healthRes.medNote,
+      has_allergy: healthRes.hasAll ?? undefined,
+      allergy_note: healthRes.allNote,
       proposed_date: (() => {
         const activeDateOptions = Array.isArray(est.estimate_request_date_options)
           ? est.estimate_request_date_options.filter((o: any) => o.status === 'PENDING')
@@ -932,10 +1103,13 @@ export default function ArtistRequestsPage() {
 
                           const depositRequired = Number(booking?.deposit_required ?? estimate?.deposit_required ?? 0);
                           const claimedAmount = Number(sub.claimed_amount || 0);
-                          const isAgeConfirmed = getIsAgeConfirmed(sub.customer_user_id);
-                          const hasHealthData = Boolean((estimate as any)?.has_medical_condition || (estimate as any)?.has_allergy);
-
                           const flashRes = booking?.flash_reservation_id ? flashReservationsMap.get(booking.flash_reservation_id) : null;
+                          const { hasMed, hasAll } = resolveItemHealth(
+                            { customer_user_id: sub.customer_user_id },
+                            estimate,
+                            flashRes,
+                            booking
+                          );
                           const requestSubmittedAt =
                             (estimate as any)?.submitted_at ||
                             estimate?.created_at ||
@@ -990,19 +1164,7 @@ export default function ArtistRequestsPage() {
                               </td>
 
                               <td className="py-3 px-4 text-center">
-                                {hasHealthData ? (
-                                  <span className="bg-amber-500/15 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded text-[10px] font-semibold inline-flex items-center gap-1">
-                                    <TriangleAlert size={10} className="text-amber-400 shrink-0" /> มีข้อมูล
-                                  </span>
-                                ) : isAgeConfirmed ? (
-                                  <span className="bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 px-2 py-0.5 rounded text-[10px] font-medium">
-                                    ยืนยันอายุแล้ว
-                                  </span>
-                                ) : (
-                                  <span className="bg-studio-sec text-studio-muted border border-studio-border px-2 py-0.5 rounded text-[10px] font-medium">
-                                    รอตรวจสอบ
-                                  </span>
-                                )}
+                                {renderHealthAlertBadge(hasMed, hasAll, false, 'SLIP')}
                               </td>
 
                               <td className="py-3 px-4">
@@ -1069,8 +1231,7 @@ export default function ArtistRequestsPage() {
                           : (item.style || item.style_preference || item.style_display || '');
                         const styleName = rawStyle.toLowerCase() === 'custom' ? '' : rawStyle;
                         const placement = item.placement || 'ไม่ระบุตำแหน่ง';
-                        const isAgeConfirmed = getIsAgeConfirmed(item.customer_user_id);
-                        const hasHealthData = Boolean(item.has_medical_condition || item.has_allergy);
+                        const { hasMed, hasAll } = resolveItemHealth(item);
 
                         return (
                           <tr
@@ -1140,20 +1301,7 @@ export default function ArtistRequestsPage() {
                             </td>
 
                             <td className="py-3 px-4 text-center">
-                              {hasHealthData ? (
-                                <span className={isInactive ? "bg-zinc-900/90 text-zinc-400 border border-zinc-700/80 px-2 py-0.5 rounded text-[10px] font-medium inline-flex items-center gap-1" : "bg-amber-500/15 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded text-[10px] font-semibold inline-flex items-center gap-1"}>
-                                  <TriangleAlert size={10} className={isInactive ? "text-zinc-500 shrink-0" : "text-amber-400 shrink-0"} />
-                                  <span>มีข้อมูล</span>
-                                </span>
-                              ) : isAgeConfirmed ? (
-                                <span className={isInactive ? "bg-zinc-900/60 text-zinc-500 border border-zinc-800/80 px-2 py-0.5 rounded text-[10px] font-medium" : "bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 px-2 py-0.5 rounded text-[10px] font-medium"}>
-                                  ยืนยันอายุแล้ว
-                                </span>
-                              ) : (
-                                <span className="bg-studio-sec text-studio-muted border border-studio-border px-2 py-0.5 rounded text-[10px] font-medium">
-                                  รอตรวจสอบ
-                                </span>
-                              )}
+                              {renderHealthAlertBadge(hasMed, hasAll, isInactive, isFlash ? 'FLASH' : 'ESTIMATE')}
                             </td>
 
                             <td className="py-3 px-4">
@@ -1198,6 +1346,13 @@ export default function ArtistRequestsPage() {
                       const customerPhone = getCustomerPhone(sub.customer_user_id);
                       const depositRequired = Number(booking?.deposit_required ?? estimate?.deposit_required ?? 0);
                       const claimedAmount = Number(sub.claimed_amount || 0);
+                      const flashRes = booking?.flash_reservation_id ? flashReservationsMap.get(booking.flash_reservation_id) : null;
+                      const { hasMed, hasAll } = resolveItemHealth(
+                        { customer_user_id: sub.customer_user_id },
+                        estimate,
+                        flashRes,
+                        booking
+                      );
 
                       return (
                         <div
@@ -1213,6 +1368,7 @@ export default function ArtistRequestsPage() {
                                 <span className="text-[10px] bg-amber-950/60 text-amber-400 border border-amber-800/60 px-2 py-0.5 rounded font-medium inline-flex items-center">
                                   สลิปรอตรวจ
                                 </span>
+                                {renderHealthAlertBadge(hasMed, hasAll, false, 'SLIP')}
                                 <span className="text-[10px] text-studio-muted font-mono">#{sub.id.slice(0, 8)}</span>
                               </div>
                               <h4 className="text-sm font-semibold text-studio-primary">
@@ -1268,8 +1424,7 @@ export default function ArtistRequestsPage() {
                       ? (sizeDisplay && sizeDisplay !== 'ไม่ระบุขนาด' ? `${placement} (${sizeDisplay})` : placement)
                       : (sizeDisplay && sizeDisplay !== 'ไม่ระบุขนาด' ? sizeDisplay : 'ไม่ระบุตำแหน่ง');
 
-                    const isAgeConfirmed = getIsAgeConfirmed(item.customer_user_id);
-                    const hasHealthData = Boolean(item.has_medical_condition || item.has_allergy);
+                    const { hasMed, hasAll } = resolveItemHealth(item);
 
                     const rawWorkTitle = isFlash
                       ? (item.flash_title || item.flash_designs?.title || item.title || item.artwork_title || 'งานสัก Flash')
@@ -1294,20 +1449,7 @@ export default function ArtistRequestsPage() {
                             </span>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
-                            {hasHealthData ? (
-                              <span className={isInactive ? "bg-zinc-900/90 text-zinc-400 border border-zinc-700/80 px-2 py-0.5 rounded text-[10px] font-medium inline-flex items-center gap-1" : "bg-amber-500/15 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded text-[10px] font-semibold inline-flex items-center gap-1"}>
-                                <TriangleAlert size={10} className={isInactive ? "text-zinc-500 shrink-0" : "text-amber-400 shrink-0"} />
-                                <span>มีข้อมูล</span>
-                              </span>
-                            ) : isAgeConfirmed ? (
-                              <span className={isInactive ? "bg-zinc-900/60 text-zinc-500 border border-zinc-800/80 px-2 py-0.5 rounded text-[10px] font-medium" : "bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 px-2 py-0.5 rounded text-[10px] font-medium"}>
-                                ยืนยันอายุแล้ว
-                              </span>
-                            ) : (
-                              <span className="bg-studio-sec text-studio-muted border border-studio-border px-2 py-0.5 rounded text-[10px] font-medium">
-                                รอตรวจสอบ
-                              </span>
-                            )}
+                            {renderHealthAlertBadge(hasMed, hasAll, isInactive, isFlash ? 'FLASH' : 'ESTIMATE')}
                             <span className={`text-[10px] px-2 py-0.5 rounded border font-medium inline-flex items-center ${statusBadge.className}`}>
                               {statusBadge.label}
                             </span>

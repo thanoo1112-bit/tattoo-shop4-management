@@ -486,16 +486,24 @@ export default function ArtistRequestDetailDrawer({ estimate, isOpen, onClose, o
               resolvedHasMed = Boolean(cust.has_medical_condition);
               resolvedMedNote = cust.medical_condition_note || cust.medical_conditions || null;
             } else if (resolvedHasMed === undefined && cust.medical_conditions?.trim()) {
-              resolvedHasMed = true;
-              resolvedMedNote = cust.medical_conditions.trim();
+              if (cust.medical_conditions === 'ไม่มี' || cust.medical_conditions === 'false') {
+                resolvedHasMed = false;
+              } else {
+                resolvedHasMed = true;
+                resolvedMedNote = cust.medical_conditions.trim();
+              }
             }
 
             if (resolvedHasAlg === undefined && cust.has_allergy !== undefined && cust.has_allergy !== null) {
               resolvedHasAlg = Boolean(cust.has_allergy);
               resolvedAlgNote = cust.allergy_note || cust.allergies || null;
             } else if (resolvedHasAlg === undefined && cust.allergies?.trim()) {
-              resolvedHasAlg = true;
-              resolvedAlgNote = cust.allergies.trim();
+              if (cust.allergies === 'ไม่มี' || cust.allergies === 'false') {
+                resolvedHasAlg = false;
+              } else {
+                resolvedHasAlg = true;
+                resolvedAlgNote = cust.allergies.trim();
+              }
             }
           }
         } catch (e) {

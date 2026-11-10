@@ -212,16 +212,24 @@ export default function ArtistPaymentReviewDrawer({
             resolvedHasMed = Boolean(custData.has_medical_condition);
             resolvedMedNote = custData.medical_condition_note || custData.medical_conditions || '';
           } else if (custData.medical_conditions?.trim()) {
-            resolvedHasMed = true;
-            resolvedMedNote = custData.medical_conditions.trim();
+            if (custData.medical_conditions === 'ไม่มี' || custData.medical_conditions === 'false') {
+              resolvedHasMed = false;
+            } else {
+              resolvedHasMed = true;
+              resolvedMedNote = custData.medical_conditions.trim();
+            }
           }
 
           if (custData.has_allergy !== undefined && custData.has_allergy !== null) {
             resolvedHasAlg = Boolean(custData.has_allergy);
             resolvedAlgNote = custData.allergy_note || custData.allergies || '';
           } else if (custData.allergies?.trim()) {
-            resolvedHasAlg = true;
-            resolvedAlgNote = custData.allergies.trim();
+            if (custData.allergies === 'ไม่มี' || custData.allergies === 'false') {
+              resolvedHasAlg = false;
+            } else {
+              resolvedHasAlg = true;
+              resolvedAlgNote = custData.allergies.trim();
+            }
           }
         }
 
@@ -234,6 +242,30 @@ export default function ArtistPaymentReviewDrawer({
           if (resolvedHasAlg === undefined && estData.has_allergy !== undefined && estData.has_allergy !== null) {
             resolvedHasAlg = Boolean(estData.has_allergy);
             resolvedAlgNote = estData.allergy_note || '';
+          }
+        }
+
+        // 2b. Check flash_reservations row if health fields still unresolved
+        if (flashData) {
+          if (resolvedHasMed === undefined && flashData.has_medical_condition !== undefined && flashData.has_medical_condition !== null) {
+            resolvedHasMed = Boolean(flashData.has_medical_condition);
+            resolvedMedNote = flashData.medical_condition_note || '';
+          }
+          if (resolvedHasAlg === undefined && flashData.has_allergy !== undefined && flashData.has_allergy !== null) {
+            resolvedHasAlg = Boolean(flashData.has_allergy);
+            resolvedAlgNote = flashData.allergy_note || '';
+          }
+        }
+
+        // 2c. Check booking row if health fields still unresolved
+        if (booking) {
+          if (resolvedHasMed === undefined && booking.has_medical_condition !== undefined && booking.has_medical_condition !== null) {
+            resolvedHasMed = Boolean(booking.has_medical_condition);
+            resolvedMedNote = booking.medical_condition_note || '';
+          }
+          if (resolvedHasAlg === undefined && booking.has_allergy !== undefined && booking.has_allergy !== null) {
+            resolvedHasAlg = Boolean(booking.has_allergy);
+            resolvedAlgNote = booking.allergy_note || '';
           }
         }
 
