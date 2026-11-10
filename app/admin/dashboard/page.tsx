@@ -167,7 +167,7 @@ export default function AdminDashboardPage() {
       const activeArtists = (artistsData || []).filter((a: any) => a.is_active !== false);
       setTotalArtistsCount(activeArtists.length || (artistsData || []).length || 0);
 
-      // 3. Card 4: คำขอที่รอดำเนินการ (estimate_requests and flash_reservations with status = 'PENDING')
+      // 3. Card 4: คำขอที่รอดำเนินการ (estimate_requests, flash_reservations with status = 'PENDING', plus pending deposit slips)
       const { data: estData, error: estErr } = await supabase
         .from('estimate_requests')
         .select('id, status, request_type')
@@ -182,10 +182,18 @@ export default function AdminDashboardPage() {
 
       if (flashErr) console.warn('[Dashboard] Pending flash reservations fetch error:', flashErr);
 
+      const { count: slipCount, error: slipErr } = await supabase
+        .from('booking_payment_submissions')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'PENDING');
+
+      if (slipErr) console.warn('[Dashboard] Pending slips fetch error:', slipErr);
+
       const customPending = (estData || []).filter((e: any) => e.request_type !== 'DIRECT_BOOKING').length;
       const flashPending = (flashData || []).length;
+      const pendingSlips = typeof slipCount === 'number' ? slipCount : 0;
 
-      setPendingRequestsCount(customPending + flashPending);
+      setPendingRequestsCount(customPending + flashPending + pendingSlips);
 
     } catch (err) {
       console.error('[Dashboard] Error fetching dashboard live metrics:', err);
@@ -201,12 +209,16 @@ export default function AdminDashboardPage() {
 
     const handleRealtime = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      if (['booking_payments', 'booking_sessions', 'bookings', 'estimate_requests', 'flash_reservations'].includes(detail?.table)) {
+      if (['booking_payments', 'booking_sessions', 'bookings', 'estimate_requests', 'flash_reservations', 'booking_payment_submissions'].includes(detail?.table)) {
         fetchDashboardMetrics();
       }
     };
     window.addEventListener('admin:realtime', handleRealtime);
-    return () => window.removeEventListener('admin:realtime', handleRealtime);
+    window.addEventListener('focus', fetchDashboardMetrics);
+    return () => {
+      window.removeEventListener('admin:realtime', handleRealtime);
+      window.removeEventListener('focus', fetchDashboardMetrics);
+    };
   }, [isStaffLoggedIn, staffRole, fetchDashboardMetrics]);
 
   if (authTimedOut && authLoading) {
@@ -260,10 +272,10 @@ export default function AdminDashboardPage() {
 
         {/* 1. TOP: 3 Primary Operational Dashboard KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-          <Link href="/admin/requests?filter=PENDING" className="block transition-transform hover:scale-[1.01]">
+          <Link href="/admin/requests" className="block transition-transform hover:scale-[1.01]">
             <KPICard
               title="คำขอที่รอดำเนินการ"
-              value={isMetricsLoading ? '...' : `${pendingRequestsCount} คำขอ`}
+              value={isMetricsLoading ? '...' : `${pendingRequestsCount} รายการ`}
               icon={FileText}
               change={isMetricsLoading ? 'กำลังโหลด...' : 'รอตรวจสอบจากร้าน'}
               changeType={pendingRequestsCount > 0 ? 'positive' : 'neutral'}
